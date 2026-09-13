@@ -1,0 +1,96 @@
+# =============================================================================
+# ANCHOR — one service, no required environment variables.
+#
+#     docker compose up --build        # ingests if needed, then serves :8000
+#     curl localhost:8000/healthz
+#     curl -s localhost:8000/v1/query -H 'content-type: application/json' \
+#          -d '{"question":"How long are gateway request logs retained?"}'
+#
+# There is no .env.example in this repo on purpose — this file is the single
+# place the environment variables are documented, so a reviewer reading the
+# compose file sees every switch there is.
+#
+# Env vars use the ANCHOR_ prefix with a DOUBLE UNDERSCORE for nesting and they
+# override config/default.yaml. Requesting a provider without its key raises
+# ProviderNotConfigured naming the missing variable — it never silently falls
+# back to the stub.
+# =============================================================================
+
+services:
+  api:
+    build: .
+    image: anchor:local
+    container_name: anchor-api
+    ports:
+      - "8000:8000"
+    volumes:
+      # The SQLite index and the vector matrix live here, so the corpus is
+      # ingested once and survives `docker compose down && up`.
+      #
+      # The container runs as non-root (uid 1000). If ./data does not exist the
+      # Docker daemon creates it as root and ingest cannot write to it, so run
+      # `mkdir -p data` first — `make up` and CI both do this for you.
+      - ./data:/app/data
+    # No `environment:` block is required. The defaults are zero-key and
+    # zero-network: llm=stub, embedder=hashing(dim=256), judge=heuristic.
+    #
+    # ---------------------------------------------------------------------
+    # TO SWITCH TO A REAL PROVIDER, uncomment ONE block and pass the key in
+    # from your own shell (`export OPENAI_API_KEY=...` etc.). Keys are never
+    # written into this file or into config/default.yaml.
+    # ---------------------------------------------------------------------
+    #
+    # environment:
+    #   # --- OpenAI -------------------------------------------------------
+    #   ANCHOR_LLM__PROVIDER: openai
+    #   ANCHOR_LLM__MODEL: gpt-4o-mini
+    #   ANCHOR_LLM__API_KEY: ${OPENAI_API_KEY:?set OPENAI_API_KEY in your shell}
+    #   # Optional: an OpenAI-compatible gateway instead of api.openai.com
+    #   # ANCHOR_LLM__BASE_URL: https://your-gateway.example.com/v1
+    #   # Real embeddings too (this invalidates data/vectors.npy — see below):
+    #   # ANCHOR_EMBEDDING__PROVIDER: openai
+    #   # ANCHOR_EMBEDDING__MODEL: text-embedding-3-small
+    #   # ANCHOR_EMBEDDING__DIM: "1536"
+    #   # ANCHOR_EMBEDDING__API_KEY: ${OPENAI_API_KEY}
+    #
+    #   # --- Azure OpenAI -------------------------------------------------
+    #   # ANCHOR_LLM__PROVIDER: azure_openai
+    #   # ANCHOR_LLM__AZURE_ENDPOINT: https://<resource>.openai.azure.com
+    #   # ANCHOR_LLM__AZURE_DEPLOYMENT: <your-chat-deployment>
+    #   # ANCHOR_LLM__AZURE_API_VERSION: "2024-06-01"
+    #   # ANCHOR_LLM__API_KEY: ${AZURE_OPENAI_API_KEY}
+    #
+    #   # --- Anthropic ----------------------------------------------------
+    #   # ANCHOR_LLM__PROVIDER: anthropic
+    #   # ANCHOR_LLM__MODEL: claude-3-5-haiku-latest
+    #   # ANCHOR_LLM__API_KEY: ${ANTHROPIC_API_KEY}
+    #
+    #   # --- Amazon Bedrock (needs the [bedrock] extra: boto3) -------------
+    #   # ANCHOR_LLM__PROVIDER: bedrock
+    #   # ANCHOR_LLM__MODEL: anthropic.claude-3-5-haiku-20241022-v1:0
+    #   # ANCHOR_LLM__AWS_REGION: us-east-1
+    #   # AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+    #   # AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+    #
+    #   # --- Anything else in config/default.yaml -------------------------
+    #   # ANCHOR_RETRIEVAL__MODE: hybrid_rerank
+    #   # ANCHOR_CHUNKING__CHUNK_TOKENS: "256"
+    #   # ANCHOR_JUDGE__PROVIDER: llm       # validate it: `make judge-check`
+    #   # ANCHOR_OBS__LOG_JSON: "false"
+    #
+    # NOTE: changing the EMBEDDING provider or dim invalidates the persisted
+    # vector index. The service refuses to start on a mismatch with
+    # IndexMismatchError; clear it with `rm -rf data/` or `anchor ingest --force`.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=4).status == 200 else 1)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    restart: unless-stopped

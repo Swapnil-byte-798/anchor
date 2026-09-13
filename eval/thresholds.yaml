@@ -1,0 +1,29 @@
+# =============================================================================
+# ANCHOR — THE CI REGRESSION GATE.
+#
+# GENERATED OUTPUT. Written by `make thresholds` (`anchor thresholds`) from a real
+# evaluation run: every floor below is that run's observed value minus
+# eval.threshold_slack, and every ceiling is the observed value plus it.
+#
+# A HUMAN MUST NEVER EDIT THE NUMBERS IN THIS FILE BY HAND. Hand-tuning a floor
+# until the build goes green is the exact failure this repo is built to prevent:
+# it converts a regression gate into a decoration. If a bound is wrong, change the
+# system until the run produces a better number, then regenerate this file.
+#
+# `make gate` (run by CI on every push) fails the build when a metric falls below
+# its floor or rises above its ceiling. Latency and n_errors are deliberately NOT
+# gated: they are machine-dependent, and a flaky gate is an ignored gate.
+#
+# Generated from run: 20260913T223237Z-66a15864436b
+# Slack: 0.05
+# =============================================================================
+slack: 0.05
+generated_from_run: 20260913T223237Z-66a15864436b
+min:
+  mrr: 0.7604
+  recall_at_10: 0.9348
+  recall_at_5: 0.8742
+  refusal_rate_unanswerable: 0.65
+max:
+  fabrication_rate_unanswerable: 0.35
+  false_refusal_rate_answerable: 0.3833

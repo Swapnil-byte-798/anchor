@@ -1,0 +1,174 @@
+# =============================================================================
+# ANCHOR — CI.
+#
+# This workflow does not merely lint and test. It INGESTS the corpus, RUNS the
+# full golden-set evaluation, and then fails the build if retrieval quality has
+# regressed below the floors in eval/thresholds.yaml. Quality is a build
+# artifact here, not a claim in a README.
+#
+# No secrets are used and none are needed: the default profile is llm=stub,
+# embedder=hashing(dim=256), judge=heuristic. The only network access in the
+# whole run is pip and the Docker base image.
+# =============================================================================
+
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  ANCHOR_CONFIG_FILE: config/default.yaml
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Lint, type-check, test, then actually run the measurement layer.
+  # ---------------------------------------------------------------------------
+  check:
+    name: check (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Lint
+        run: ruff check src tests scripts
+
+      - name: Typecheck
+        run: mypy src
+
+      - name: Tests
+        run: pytest
+
+      # The golden set is committed. Regenerating it must produce a
+      # byte-identical file, which is what proves no question was ever quietly
+      # retuned to make a score go up. (tests/test_golden_integrity.py asserts
+      # this too; running the builder here catches a drifted corpus as well.)
+      - name: Golden set is reproducible
+        run: |
+          python scripts/build_golden.py
+          git diff --exit-code -- eval/golden/qa.jsonl
+
+      - name: Ingest corpus
+        run: anchor ingest
+
+      - name: Evaluate
+        run: make eval
+
+      # =======================================================================
+      # THE REGRESSION GATE — the point of this workflow.
+      #
+      # eval/thresholds.yaml holds min/max floors GENERATED from a real run by
+      # `make thresholds` (observed minus eval.threshold_slack), never typed by
+      # hand. If recall@5, groundedness, the unanswerable refusal rate or any
+      # other tracked metric drops below its floor, this step fails and the
+      # build is red. A retrieval regression cannot be merged silently.
+      # =======================================================================
+      - name: Regression gate
+        run: make gate
+
+      # The README's metric table is written by a shipped command. If it no
+      # longer matches the numbers this run produced, the committed table is
+      # stale and the build fails rather than shipping a wrong number.
+      - name: README table is not stale
+        run: make readme-check
+
+      # An unvalidated judge is not evidence. Score the configured judge against
+      # the 30 frozen human labels on every push.
+      - name: Judge validation
+        run: make judge-check
+
+      - name: Upload eval reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-reports-py${{ matrix.python-version }}
+          path: eval/reports/
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  # The container has to actually serve a grounded answer, with no keys set.
+  # ---------------------------------------------------------------------------
+  docker:
+    name: docker smoke
+    runs-on: ubuntu-latest
+    needs: check
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t anchor:ci .
+
+      # The container runs as uid 1000; if the daemon creates the bind-mount
+      # source itself it lands root-owned and ingest cannot write the index.
+      - name: Start the service
+        run: |
+          mkdir -p data && chmod 777 data
+          docker compose up -d --build
+
+      - name: Wait for /healthz
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8000/healthz > /dev/null; then
+              echo "healthy after ${i}s"
+              curl -fsS http://localhost:8000/healthz
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "service never became healthy" >&2
+          docker compose logs --no-color
+          exit 1
+
+      # A refusal is a 200 with a typed answer_type, so any non-2xx here is a
+      # real failure rather than the abstain gate doing its job.
+      - name: Smoke POST /v1/query
+        run: |
+          curl -fsS -X POST http://localhost:8000/v1/query \
+            -H 'content-type: application/json' \
+            -d '{"question":"How long are gateway request logs retained?"}' \
+            | tee /tmp/answer.json
+          python - <<'PY'
+          import json
+          body = json.load(open("/tmp/answer.json"))
+          assert body["answer_type"] in {
+              "grounded", "partial",
+              "refused_no_evidence", "refused_low_support", "refused_policy",
+          }, body
+          assert isinstance(body["answer"], str) and body["answer"], body
+          print("smoke ok:", body["answer_type"])
+          PY
+
+      - name: Service logs
+        if: always()
+        run: docker compose logs --no-color
+
+      - name: Stop the service
+        if: always()
+        run: docker compose down -v

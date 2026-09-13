@@ -1,0 +1,42 @@
+# =============================================================================
+# ANCHOR — what is NOT committed.
+#
+# Note what is deliberately ABSENT from this file: eval/reports/*.md.
+# The ablation table, the failure taxonomy and the judge-agreement report are
+# COMMITTED ARTIFACTS — they are the evidence this repo exists to present, and
+# a reviewer must be able to read them without running anything. Only the
+# machine-readable JSON/JSONL alongside them is regenerated and ignored.
+# =============================================================================
+
+# The index: SQLite FTS5 database + the float32 vector matrix. Rebuilt in
+# seconds by `anchor ingest`, so there is no reason to carry it in git.
+data/
+
+# Generated run output. The .md reports next to these ARE committed.
+eval/reports/*.json
+eval/reports/*.jsonl
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Environments and secrets. There is no .env in this repo and there never
+# should be — every default runs with zero keys.
+.venv/
+venv/
+.env
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/

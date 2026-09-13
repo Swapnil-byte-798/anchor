@@ -1,0 +1,137 @@
+# =============================================================================
+# ANCHOR — packaging, dependencies and tool configuration for the WHOLE repo.
+#
+# The dependency list below is EXHAUSTIVE. If a package is not named here it is
+# not available to any module in this repository. That is deliberate: the whole
+# point of the project is that the retrieval stack is legible end to end, so
+# there is no vector-database, no orchestration framework and no provider SDK
+# hiding the interesting decisions.
+#
+# Explicitly NOT dependencies, and why:
+#   langchain / llamaindex     the retrieval pipeline IS the thing being shown
+#   chromadb / faiss / qdrant  a numpy float32 matrix + SQLite FTS5 is enough
+#   sentence-transformers      would download a model; the default path is
+#                              zero-network and the embedder is numpy-only
+#   openai / anthropic SDKs    remote providers are ~40 lines of raw httpx
+#   scikit-learn               the hashing embedder needs numpy and nothing else
+#   prometheus-client          obs.MetricsRegistry is 40 lines behind /metrics
+# =============================================================================
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "anchor"
+version = "0.1.0"
+description = "A grounded RAG + tool-agent service that measures its own retrieval quality."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Anchor" }]
+keywords = ["rag", "retrieval", "evaluation", "ablation", "groundedness"]
+classifiers = [
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Intended Audience :: Developers",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+# Lower bounds only — loosely pinned on purpose so a reviewer can `pip install`
+# today and get a working tree without a lockfile resolution fight.
+dependencies = [
+  "fastapi>=0.115",         # POST /v1/query, POST /v1/agent, GET /healthz
+  "uvicorn[standard]>=0.30", # the ASGI server the container runs
+  "pydantic>=2.9",          # every contract in src/anchor/types.py
+  "pydantic-settings>=2.5",  # env + .env + YAML precedence in settings.py
+  "PyYAML>=6.0",            # config/default.yaml and eval/thresholds.yaml
+  "numpy>=1.26",            # the vector store, the embedder, MMR
+  "httpx>=0.27",            # raw calls to OpenAI / Azure / Anthropic
+  "typer>=0.12",            # the `anchor` CLI
+  "rich>=13.7",             # CLI tables for ask / eval / ablate
+]
+
+[project.optional-dependencies]
+# Only needed if you switch llm.provider or embedding.provider to `bedrock`.
+bedrock = ["boto3>=1.34"]
+dev = [
+  "pytest>=8.2",
+  "ruff>=0.6",
+  "mypy>=1.11",
+  "types-PyYAML",
+]
+
+[project.scripts]
+anchor = "anchor.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/anchor/anchor"
+
+# ---- hatchling: src layout, one package -------------------------------------
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/anchor"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/anchor", "config", "corpus", "eval", "tests", "scripts", "Makefile"]
+
+# ---- ruff -------------------------------------------------------------------
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+# E/F pycodestyle+pyflakes, I import sorting, UP pyupgrade, B bugbear.
+select = ["E", "F", "I", "UP", "B"]
+
+# The shared contracts in src/anchor/{types,settings,context,textutil,obs}.py are
+# reproduced byte-for-byte across five independently written parts of the repo,
+# so the linter accommodates them rather than the other way round. Each of these
+# is a style preference, not a defect:
+ignore = [
+  "UP035", # `from typing import Sequence` — the Protocols in types.py use it
+  "UP037", # quoted annotations — genuine TYPE_CHECKING forward refs in context.py
+  "UP042", # `class AnswerType(str, Enum)` — StrEnum changes str() and format()
+  "UP017", # `timezone.utc` — spelled out rather than the 3.11+ `datetime.UTC` alias
+]
+
+[tool.ruff.lint.per-file-ignores]
+# One contract docstring runs to 103 characters. Reflowing it would mean editing
+# a file that five parts of the repo copy verbatim; a scoped exemption is cheaper.
+"src/anchor/textutil.py" = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["anchor"]
+
+# ---- mypy -------------------------------------------------------------------
+
+[tool.mypy]
+# NOTE: python_version is deliberately NOT pinned. The floor is 3.11 (see
+# requires-python above) and the CI matrix checks 3.11 and 3.12, so mypy already
+# analyses at the matrix leg's own version. Hard-pinning it to 3.11 makes mypy
+# refuse to parse third-party stubs that use PEP 695 `type` statements — numpy's
+# do — which would fail the 3.12 leg for a reason that has nothing to do with
+# this codebase.
+mypy_path = "src"
+warn_unused_configs = true
+no_implicit_optional = true
+check_untyped_defs = true
+ignore_missing_imports = false
+# Deliberately NOT `strict`: the pydantic models and Protocols in types.py
+# already carry the types that matter here, and every cross-module signature is
+# annotated. A repo that cannot be cloned and type-checked in one command is
+# worse than one with a pragmatic setting.
+
+[[tool.mypy.overrides]]
+# boto3 is an optional extra (only the `bedrock` provider imports it, lazily)
+# and ships no stubs we depend on.
+module = ["boto3", "boto3.*", "botocore", "botocore.*"]
+ignore_missing_imports = true
+
+# ---- pytest -----------------------------------------------------------------
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
