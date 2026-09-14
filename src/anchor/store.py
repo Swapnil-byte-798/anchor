@@ -442,13 +442,13 @@ class NumpyVectorStore:
             scores = self._matrix @ query
             n = scores.shape[0]
             take = min(k, n)
-            if take < n:
-                head = np.argpartition(-scores, take - 1)[:take]
-            else:
-                head = np.arange(n)
-            ranked = sorted(
-                (int(i) for i in head), key=lambda i: (-float(scores[i]), self._ids[i])
-            )
+            # Rank the WHOLE index, then cut. The (score DESC, chunk_id ASC) order
+            # has to decide WHICH of two tied rows survives the cut, not merely how
+            # the survivors are arranged: np.argpartition would hand that choice to
+            # numpy's introselect, which is implementation-defined across builds and
+            # would break the byte-reproducibility this ordering exists to provide.
+            # n is a few hundred chunks, so the full sort costs nothing measurable.
+            ranked = sorted(range(n), key=lambda i: (-float(scores[i]), self._ids[i]))
             return [(self._ids[i], float(scores[i])) for i in ranked[:take]]
 
     def get(self, chunk_id: str) -> np.ndarray | None:

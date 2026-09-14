@@ -15,10 +15,15 @@ calculator or by lookup_metric has no document citation and never will, so it is
 folded into the result as a Claim with `supported=False`. The agent is not
 allowed to launder a computed value into a cited one.
 
-Dependency direction: this module sits beside `service` (context -> {service,
-agent}) and imports downward only. `check_question` is imported from service
-because the agent must apply the input policy BEFORE it spends any budget on
-tools; service never imports agent, so this stays one-way.
+Dependency direction: this module sits ABOVE `context` and `service`, not beside
+them. `AgentLoop`, `build_tools` and `get_planner` are all handed the whole
+`AppContext`, so `agent` imports `context` at runtime — not under
+TYPE_CHECKING — and
+`check_question`/`refusal_result` are imported from `service` because the agent
+must apply the input policy BEFORE it spends any budget on tools and must refuse
+in the same shape POST /v1/query does. Neither `context` nor `service` imports
+`agent`, so the edges stay one-way: api/cli -> agent -> context -> ... and
+agent -> service.
 """
 
 from __future__ import annotations
@@ -36,14 +41,16 @@ from typing import Any, Callable
 from pydantic import BaseModel, Field, ValidationError
 
 from anchor.context import AppContext
-from anchor.errors import BudgetExceeded, ConfigError, ToolError
+from anchor.errors import BudgetExceeded, ConfigError, PolicyViolation, ToolError
+from anchor.grounding import classify_answer
 from anchor.llm import render_plan_messages
 from anchor.obs import TraceRecorder, get_logger, log_event
-from anchor.service import check_question
+from anchor.service import check_question, refusal_result
 from anchor.settings import Settings
 from anchor.textutil import sha256_text, truncate_to_tokens
 from anchor.types import (
     AgentResult,
+    AnswerResult,
     AnswerType,
     ChatMessage,
     Claim,
@@ -64,9 +71,19 @@ NO_RESULTS = "NO_RESULTS"
 # A tool value is spliced into the prose only when it is short enough to read as
 # part of an answer; longer ones stay on the ToolStep and on their Claim.
 ANSWER_FOLD_MAX_CHARS = 200
+# Two refusal causes, two different retrieval facts, so two different notes. The
+# no-evidence refusal means the gate rejected the query and NOTHING was packed;
+# the low-support refusal means the opposite — the gate passed and blocks were
+# packed, and the generator or the verifier declined afterwards. One shared
+# sentence would be a false statement of cause on whichever branch it did not
+# describe, in the one dimension this repo claims competence in.
 UNGROUNDED_TOOL_VALUE_NOTE = (
     "No supporting passage was retrieved, so this value comes from a tool and is "
     "not grounded in any indexed document."
+)
+UNSUPPORTED_TOOL_VALUE_NOTE = (
+    "Passages were retrieved but none supported an answer, so this value comes "
+    "from a tool and is not grounded in any indexed document."
 )
 
 
@@ -595,8 +612,17 @@ class AgentLoop:
     def run(
         self, question: str, *, include_trace: bool = False, max_steps: int | None = None
     ) -> AgentResult:
-        # The input policy applies BEFORE any budget is spent on tools.
-        check_question(question, self._settings)
+        recorder = self._ctx.answer_service.new_recorder(question)
+
+        # The input policy applies BEFORE any budget is spent on tools — and a
+        # refusal is a 200 on BOTH endpoints. Letting PolicyViolation escape here
+        # made the same empty question a 200 `refused_policy` on /v1/query and a
+        # 400 error envelope on /v1/agent, with no answer_type to measure: the
+        # refusal class was structurally uncountable on this path.
+        try:
+            check_question(question, self._settings)
+        except PolicyViolation as exc:
+            return self._policy_refusal(exc, recorder=recorder, include_trace=include_trace)
 
         agent_cfg = self._settings.agent
         # A caller may lower the step budget but never raise it above the config.
@@ -604,7 +630,6 @@ class AgentLoop:
         if max_steps is not None:
             limit = max(1, min(int(max_steps), agent_cfg.max_steps))
 
-        recorder = self._ctx.answer_service.new_recorder(question)
         recorder.note(f"agent planner={self._planner.name} max_steps={limit}")
         started = time.perf_counter()
         history: list[ToolStep] = []
@@ -663,6 +688,38 @@ class AgentLoop:
         )
 
     # -- internals -----------------------------------------------------------
+    def _policy_refusal(
+        self, exc: PolicyViolation, *, recorder: TraceRecorder, include_trace: bool
+    ) -> AgentResult:
+        """A policy refusal, in the same shape POST /v1/query returns it.
+
+        Built from `service.refusal_result` so the two endpoints cannot drift:
+        same answer_type, same refusal_reason, same 200.
+        """
+        recorder.note(f"policy: {exc}")
+        recorder.finish(AnswerType.REFUSED_POLICY, 0.0)
+        refusal = refusal_result(
+            str(exc), AnswerType.REFUSED_POLICY, recorder.trace_id, recorder.elapsed_ms()
+        )
+        log_event(logger, logging.INFO, "agent.refused", reason="policy", detail=str(exc))
+        return AgentResult(
+            answer=refusal.answer,
+            answer_type=refusal.answer_type,
+            claims=[],
+            citations=[],
+            groundedness=refusal.groundedness,
+            judge=None,
+            refusal_reason=refusal.refusal_reason,
+            trace_id=refusal.trace_id,
+            latency_ms=refusal.latency_ms,
+            usage=refusal.usage,
+            tool_steps=[],
+            steps_used=0,
+            budget_exhausted=False,
+            planner=self._planner.name,
+            trace=recorder.trace if include_trace else None,
+        )
+
     def _plan(self, question: str, history: list[ToolStep]) -> PlannedStep:
         """A planner that raises is a planner that is done."""
         try:
@@ -760,10 +817,20 @@ class AgentLoop:
     ) -> AgentResult:
         """One synthesis path, shared with POST /v1/query.
 
-        The RAG answer governs grounding, refusal and the judge verdict. Tool
+        The RAG answer governs retrieval, generation and the judge verdict. Tool
         values are then folded in as explicitly UNSUPPORTED claims: a computed
         number has no document citation and pretending otherwise would be the
         exact dishonesty this repo is built to avoid.
+
+        The fold therefore changes the answer, so `groundedness` and
+        `answer_type` are recomputed over the folded string rather than copied
+        from the pre-fold RAG result. Copying them was that same dishonesty by
+        omission: the scalar said 1.000 and the label said `grounded` for an
+        answer whose visible sentences were mostly uncited tool output, and that
+        number reached the published eval table through the arithmetic cases.
+        The judge verdict is the one field still scored pre-fold; it is produced
+        inside `AnswerService.answer` against the context blocks, which do not
+        cross this boundary.
         """
         result = self._ctx.answer_service.answer(
             question, include_trace=include_trace, recorder=recorder
@@ -802,20 +869,55 @@ class AgentLoop:
             if len(text) <= ANSWER_FOLD_MAX_CHARS and _result_missing_from(answer, step.tool, text):
                 prefix.append(text)
 
+        # `result.groundedness` and `result.answer_type` describe the PRE-fold RAG
+        # string. The fold changes that string, so both have to be recomputed over
+        # the answer the caller actually receives — copying them through reported
+        # 1.000 / grounded for an answer that was two-thirds uncited tool output,
+        # which is exactly the laundering the module docstring forbids.
+        groundedness = result.groundedness
+
         if prefix and answer_type in {
             AnswerType.REFUSED_NO_EVIDENCE,
             AnswerType.REFUSED_LOW_SUPPORT,
         }:
-            # Retrieval found nothing, but a tool did produce a real value. The
-            # honest label is partial: part of this is computed and uncited, and
-            # none of it is document-grounded. Say so instead of pasting the
-            # computed number in front of a refusal sentence.
+            # A tool produced a real value but no document backs any of the prose.
+            # The honest label is partial: part of this is computed and uncited,
+            # and none of it is document-grounded. Say so instead of pasting the
+            # computed number in front of a refusal sentence. The two refusal
+            # causes get DIFFERENT notes: no-evidence means nothing was retrieved,
+            # low-support means passages were retrieved and none supported an
+            # answer, and saying the first on the second path is a false statement
+            # of cause the printed trace contradicts on the same screen.
+            no_evidence = answer_type == AnswerType.REFUSED_NO_EVIDENCE
+            note = UNGROUNDED_TOOL_VALUE_NOTE if no_evidence else UNSUPPORTED_TOOL_VALUE_NOTE
+            cause = (
+                "retrieval found nothing"
+                if no_evidence
+                else "retrieval found no passage that supported an answer"
+            )
             answer_type = AnswerType.PARTIAL
             refusal_reason = None
-            answer = " ".join(prefix + [UNGROUNDED_TOOL_VALUE_NOTE]).strip()
-            recorder.note("retrieval refused but a tool value exists; downgraded to partial")
+            answer = " ".join(prefix + [note]).strip()
+            # Every sentence of this answer is uncited; `refusal_result` already
+            # reports 0.0 and the fold cannot raise it.
+            groundedness = 0.0
+            recorder.note(f"{cause}, but a tool value exists; downgraded to partial")
         elif prefix:
             answer = " ".join(prefix + [answer]).strip()
+            groundedness = _folded_support_ratio(result, len(prefix))
+            answer_type = classify_answer(groundedness, self._settings)
+            if answer_type == AnswerType.REFUSED_LOW_SUPPORT:
+                # This answer HAS content — a cited sentence and a computed value —
+                # so calling it a refusal would be the opposite lie, and it would
+                # score a correct arithmetic answer as a false refusal in eval.
+                # Partial is the same call the branch above makes for the same
+                # situation: some of this is grounded, some of it is not.
+                answer_type = AnswerType.PARTIAL
+            recorder.note(
+                f"folded {len(prefix)} uncited value(s) into the answer: groundedness "
+                f"{result.groundedness:.3f} -> {groundedness:.3f}, "
+                f"{result.answer_type.value} -> {answer_type.value}"
+            )
 
         trace = result.trace
         if trace is None and include_trace:
@@ -826,7 +928,7 @@ class AgentLoop:
             answer_type=answer_type,
             claims=claims,
             citations=list(result.citations),
-            groundedness=result.groundedness,
+            groundedness=groundedness,
             judge=result.judge,
             refusal_reason=refusal_reason,
             trace_id=result.trace_id or recorder.trace_id,
@@ -843,6 +945,28 @@ class AgentLoop:
 # ==============================================================================
 # Module helpers
 # ==============================================================================
+
+
+def _folded_support_ratio(result: AnswerResult, folded_sentences: int) -> float:
+    """Groundedness of the answer AFTER uncited tool values are spliced into it.
+
+    The metric is defined as the share of ANSWER SENTENCES supported by their
+    cited block, so folding N uncited sentences in enlarges the denominator by N
+    and leaves the numerator alone. The numerator is `result.claims` (the
+    verifier keeps only supported sentences there); the denominator's first term
+    is the count of sentences the verifier actually scored, which `AnswerResult`
+    does not carry — the unsupported ones went to `dropped_claims` — so it is
+    recovered from the ratio the verifier reported. Re-splitting the answer into
+    sentences here would risk counting a different set than the verifier did,
+    which is how the two numbers drift apart again.
+
+    A computed value that was recorded as a claim but NOT spliced into the prose
+    is not an answer sentence, so it does not dilute the ratio.
+    """
+    supported = sum(1 for claim in result.claims if claim.supported)
+    scored = round(supported / result.groundedness) if result.groundedness > 0 else supported
+    total = max(scored, supported) + folded_sentences
+    return round(supported / total, 4) if total else 0.0
 
 
 def _clip(text: str, limit: int = MAX_OBSERVATION_CHARS) -> str:

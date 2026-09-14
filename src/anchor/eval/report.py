@@ -71,11 +71,29 @@ MIN_METRICS: tuple[str, ...] = (
 # on every run that re-checks whether the degeneracy still holds, so a real
 # provider that makes the metric informative is visible immediately.
 
+# `fabrication_rate_unanswerable` is NOT gated either, by the same argument. It
+# counts unanswerable cases that were answered AND cited at least one document
+# (`runner._compute_metrics`), while `refusal_rate_unanswerable` counts the ones
+# that abstained. In this pipeline a non-abstained answer always carries a
+# citation: `check_grounding` scores every sentence with no citation marker at 0.0
+# support and drops it, and builds `citations` only from the markers used by a
+# SUPPORTED claim; `classify_answer` returns a refusal unless the support ratio
+# clears `grounding.partial_ratio`. So a non-refusal has at least one supported
+# claim, hence at least one marker, hence at least one cited doc id. Over the
+# unanswerable slice that makes fabrication exactly `1 - refusal_rate_unanswerable`
+# — the two sum to 1.000000 on every committed run, and no committed case result
+# is non-abstained with an empty citation list. A ceiling on it is therefore the
+# floor on refusal written a second time under another name: min 0.65 refusal and
+# max 0.35 fabrication are the single inequality `refusal >= 0.65`, which made the
+# gate report six checks having enforced five. On a `--retrieval-only` run it is
+# worse than duplicated: that path never populates `cited_doc_ids`, so the metric
+# is 0.0 by construction and any ceiling passes trivially. It is still computed and
+# still reported in the table below — it is the BOUND that was a duplicate. A
+# provider or grounding path able to emit an uncited answer makes the two
+# independent again, at which point it can be gated.
+
 # Metrics whose CEILING is generated (lower is better).
-MAX_METRICS: tuple[str, ...] = (
-    "fabrication_rate_unanswerable",
-    "false_refusal_rate_answerable",
-)
+MAX_METRICS: tuple[str, ...] = ("false_refusal_rate_answerable",)
 
 # Machine-dependent or bookkeeping metrics: never gated, never in the README table.
 UNGATED_METRICS: frozenset[str] = frozenset({"latency_p50_ms", "latency_p95_ms", "n_errors"})
@@ -456,8 +474,15 @@ def write_thresholds(report: MetricReport, path: str, slack: float) -> Threshold
             "# system until the run produces a better number, then regenerate this file.",
             "#",
             "# `make gate` (run by CI on every push) fails the build when a metric falls below",
-            "# its floor or rises above its ceiling. Latency and n_errors are deliberately NOT",
-            "# gated: they are machine-dependent, and a flaky gate is an ignored gate.",
+            "# its floor or rises above its ceiling. Not every metric in the README table is",
+            "# bounded here, and the omissions are deliberate:",
+            "#   * latency_p50_ms / latency_p95_ms / n_errors — machine-dependent or",
+            "#     bookkeeping, and a flaky gate is an ignored gate.",
+            "#   * groundedness and fabrication_rate_unanswerable — on this profile each is",
+            "#     algebraically a copy of a bound already in the list (the answerable",
+            "#     false-refusal rate and the unanswerable refusal rate respectively), so",
+            "#     bounding them wrote the same inequality twice under two names. They are",
+            "#     still computed and still reported. See src/anchor/eval/report.py.",
             "#",
             f"# Generated from run: {spec.generated_from_run}",
             f"# Slack: {spec.slack}",

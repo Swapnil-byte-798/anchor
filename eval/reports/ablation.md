@@ -4,7 +4,7 @@
 > written by the command, and hand-editing one is the failure mode this repo is
 > built to prevent.
 
-Run at 2026-09-13T22:31:11Z — embedder `hashing` | judge `heuristic` | llm `stub` (unused: retrieval only) | config fingerprint `ef995ed4d623`.
+Run at 2026-09-14T10:50:29Z — embedder `hashing` | judge `heuristic` | llm `stub` (unused: retrieval only) | base config fingerprint `66a15864436b`.
 
 ## Read the deltas, not the absolute column
 
@@ -38,55 +38,55 @@ The most likely reason is a property of the BENCHMARK, not a defect in the dense
 
 | mode | recall@5 | recall@10 | MRR | nDCG@10 | p50 ms | p95 ms | Δ recall@5 vs bm25 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `bm25` **(baseline)** | 1.000 | 1.000 | 0.970 | 0.980 | 2.7 | 3.1 | — |
-| `dense` | 0.909 | 0.939 | 0.817 | 0.836 | 2.5 | 5.4 | -0.091 |
-| `hybrid` | 0.924 | 0.985 | 0.810 | 0.852 | 6.8 | 13.5 | -0.076 |
-| `hybrid_rerank` | 0.955 | 1.000 | 0.960 | 0.960 | 7.0 | 14.0 | -0.045 |
+| `bm25` **(baseline)** | 1.000 | 1.000 | 0.970 | 0.980 | 12.1 | 28.3 | — |
+| `dense` | 0.909 | 0.939 | 0.817 | 0.836 | 11.6 | 32.6 | -0.091 |
+| `hybrid` | 0.924 | 0.985 | 0.810 | 0.852 | 31.3 | 108.9 | -0.076 |
+| `hybrid_rerank` | 0.955 | 1.000 | 0.960 | 0.960 | 42.8 | 108.2 | -0.045 |
 
 #### chunk_tokens=96, chunk_overlap=24
 
 | mode | recall@5 | recall@10 | MRR | nDCG@10 | p50 ms | p95 ms | Δ recall@5 vs bm25 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `bm25` **(baseline)** | 1.000 | 1.000 | 0.970 | 0.979 | 2.9 | 3.5 | — |
-| `dense` | 0.909 | 0.939 | 0.833 | 0.844 | 2.4 | 4.2 | -0.091 |
-| `hybrid` | 0.924 | 0.985 | 0.833 | 0.859 | 5.8 | 7.2 | -0.076 |
-| `hybrid_rerank` | 0.955 | 1.000 | 0.975 | 0.971 | 7.5 | 14.2 | -0.045 |
+| `bm25` **(baseline)** | 1.000 | 1.000 | 0.970 | 0.979 | 22.5 | 153.1 | — |
+| `dense` | 0.909 | 0.939 | 0.833 | 0.844 | 31.3 | 152.7 | -0.091 |
+| `hybrid` | 0.924 | 0.985 | 0.833 | 0.859 | 50.1 | 229.4 | -0.076 |
+| `hybrid_rerank` | 0.955 | 1.000 | 0.975 | 0.971 | 33.9 | 82.3 | -0.045 |
 
 #### chunk_tokens=96, chunk_overlap=40
 
 | mode | recall@5 | recall@10 | MRR | nDCG@10 | p50 ms | p95 ms | Δ recall@5 vs bm25 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `bm25` **(baseline)** | 1.000 | 1.000 | 0.955 | 0.970 | 3.5 | 7.9 | — |
-| `dense` | 0.864 | 0.924 | 0.786 | 0.801 | 2.5 | 5.0 | -0.136 |
-| `hybrid` | 0.909 | 0.970 | 0.803 | 0.830 | 6.0 | 8.5 | -0.091 |
-| `hybrid_rerank` | 0.939 | 0.985 | 0.960 | 0.953 | 7.3 | 12.0 | -0.061 |
+| `bm25` **(baseline)** | 1.000 | 1.000 | 0.955 | 0.970 | 13.5 | 28.4 | — |
+| `dense` | 0.864 | 0.924 | 0.786 | 0.801 | 8.8 | 32.9 | -0.136 |
+| `hybrid` | 0.909 | 0.970 | 0.803 | 0.830 | 26.2 | 144.8 | -0.091 |
+| `hybrid_rerank` | 0.939 | 0.985 | 0.960 | 0.953 | 70.7 | 136.7 | -0.061 |
 
 #### chunk_tokens=112, chunk_overlap=24
 
 | mode | recall@5 | recall@10 | MRR | nDCG@10 | p50 ms | p95 ms | Δ recall@5 vs bm25 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `bm25` **(baseline)** | 1.000 | 1.000 | 0.970 | 0.979 | 3.2 | 3.9 | — |
-| `dense` | 0.909 | 0.939 | 0.833 | 0.844 | 2.3 | 2.9 | -0.091 |
-| `hybrid` | 0.924 | 0.985 | 0.833 | 0.859 | 5.9 | 8.5 | -0.076 |
-| `hybrid_rerank` | 0.955 | 1.000 | 0.975 | 0.971 | 7.4 | 14.9 | -0.045 |
+| `bm25` **(baseline)** | 1.000 | 1.000 | 0.970 | 0.979 | 8.8 | 15.6 | — |
+| `dense` | 0.909 | 0.939 | 0.833 | 0.844 | 9.4 | 28.6 | -0.091 |
+| `hybrid` | 0.924 | 0.985 | 0.833 | 0.859 | 35.3 | 158.2 | -0.076 |
+| `hybrid_rerank` | 0.955 | 1.000 | 0.975 | 0.971 | 37.1 | 97.0 | -0.045 |
 
 #### chunk_tokens=128, chunk_overlap=24
 
 | mode | recall@5 | recall@10 | MRR | nDCG@10 | p50 ms | p95 ms | Δ recall@5 vs bm25 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `bm25` **(baseline)** | 1.000 | 1.000 | 0.970 | 0.979 | 2.9 | 3.9 | — |
-| `dense` | 0.909 | 0.939 | 0.833 | 0.844 | 2.4 | 4.6 | -0.091 |
-| `hybrid` | 0.924 | 0.985 | 0.833 | 0.860 | 6.1 | 9.8 | -0.076 |
-| `hybrid_rerank` | 0.955 | 1.000 | 0.975 | 0.971 | 7.1 | 8.0 | -0.045 |
+| `bm25` **(baseline)** | 1.000 | 1.000 | 0.970 | 0.979 | 18.5 | 89.8 | — |
+| `dense` | 0.909 | 0.939 | 0.833 | 0.844 | 17.1 | 78.6 | -0.091 |
+| `hybrid` | 0.924 | 0.985 | 0.833 | 0.860 | 60.4 | 125.0 | -0.076 |
+| `hybrid_rerank` | 0.955 | 1.000 | 0.975 | 0.971 | 41.5 | 99.1 | -0.045 |
 
 #### chunk_tokens=144, chunk_overlap=24
 
 | mode | recall@5 | recall@10 | MRR | nDCG@10 | p50 ms | p95 ms | Δ recall@5 vs bm25 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `bm25` **(baseline)** | 1.000 | 1.000 | 0.970 | 0.980 | 2.8 | 3.8 | — |
-| `dense` | 0.909 | 0.939 | 0.817 | 0.837 | 2.5 | 3.2 | -0.091 |
-| `hybrid` | 0.924 | 1.000 | 0.811 | 0.857 | 5.6 | 6.9 | -0.076 |
-| `hybrid_rerank` | 0.955 | 1.000 | 0.960 | 0.960 | 6.9 | 8.3 | -0.045 |
+| `bm25` **(baseline)** | 1.000 | 1.000 | 0.970 | 0.980 | 9.5 | 32.0 | — |
+| `dense` | 0.909 | 0.939 | 0.817 | 0.837 | 12.3 | 41.9 | -0.091 |
+| `hybrid` | 0.924 | 1.000 | 0.811 | 0.857 | 30.8 | 93.9 | -0.076 |
+| `hybrid_rerank` | 0.955 | 1.000 | 0.960 | 0.960 | 71.3 | 217.1 | -0.045 |
 
 ## Method
 
@@ -99,6 +99,11 @@ The most likely reason is a property of the BENCHMARK, not a defect in the dense
 * Each ingested index is FINGERPRINTED (sha256 of its sorted chunk ids). If two chunk
   configurations produce the same index they are the same experiment, and a banner at
   the top of this report says so instead of letting the duplicate pass as a data point.
+* The **base config fingerprint** in the preamble is the fingerprint of the
+  configuration this command was invoked with — the same digest `anchor eval` stamps
+  on its reports — so two runs of an unchanged config print the same value. It covers
+  everything the grid holds fixed; the two things the grid varies are printed with the
+  rows themselves: the chunk config heads each block, the mode labels each row.
 * The abstain gate uses one ratio feature and therefore one threshold across all four
   modes — no per-mode retuning, which is what keeps the rows comparable.
 * Retrieval only: no generation, no grounding, no judge.

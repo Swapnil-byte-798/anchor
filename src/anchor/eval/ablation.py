@@ -400,11 +400,19 @@ def _write_report(
             banner.append(f"> * identical index: {configs}")
         banner.append("")
 
+    # The provider names are read off a completed run because that is where the
+    # resolved component identities live. The config fingerprint is NOT: every
+    # report in `reports` was produced by a throwaway copy of the settings whose
+    # paths.* point at a `tempfile.mkdtemp()` directory (see `_config_for`), and
+    # `Settings.fingerprint()` hashes those paths, so stamping `reports[0]` gave a
+    # fresh random digest on every run of an unchanged configuration — the exact
+    # opposite of provenance. The caller's own settings are hashed instead, which
+    # is the same value `anchor eval` stamps on its reports for the same config.
     sample = reports[0] if reports else None
     stamp = (
         f"embedder `{sample.embedder_name}` | judge `{sample.judge_name}` | "
         f"llm `{sample.llm_name}` (unused: retrieval only) | "
-        f"config fingerprint `{sample.config_fingerprint}`"
+        f"base config fingerprint `{settings.fingerprint()}`"
         if sample is not None
         else "no runs"
     )
@@ -452,6 +460,11 @@ def _write_report(
         "* Each ingested index is FINGERPRINTED (sha256 of its sorted chunk ids). If two chunk",
         "  configurations produce the same index they are the same experiment, and a banner at",
         "  the top of this report says so instead of letting the duplicate pass as a data point.",
+        "* The **base config fingerprint** in the preamble is the fingerprint of the",
+        "  configuration this command was invoked with — the same digest `anchor eval` stamps",
+        "  on its reports — so two runs of an unchanged config print the same value. It covers",
+        "  everything the grid holds fixed; the two things the grid varies are printed with the",
+        "  rows themselves: the chunk config heads each block, the mode labels each row.",
         "* The abstain gate uses one ratio feature and therefore one threshold across all four",
         "  modes — no per-mode retuning, which is what keeps the rows comparable.",
         "* Retrieval only: no generation, no grounding, no judge.",

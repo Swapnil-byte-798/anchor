@@ -31,6 +31,7 @@ import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, AsyncIterator, Awaitable, Callable
 
 from fastapi import FastAPI, Request
@@ -42,7 +43,7 @@ from starlette.responses import Response
 from anchor import __version__
 from anchor.agent import AgentLoop, build_tools, get_planner
 from anchor.context import AppContext, build_context
-from anchor.errors import AnchorError, http_status_for
+from anchor.errors import AnchorError, IngestError, http_status_for
 from anchor.ingest import ingest_corpus
 from anchor.obs import METRICS, configure_logging, current_request_id, get_logger, log_event
 from anchor.settings import Settings, get_settings
@@ -122,28 +123,23 @@ def _register_middleware(app: FastAPI, cfg: Settings) -> None:
         request_id = uuid.uuid4().hex
         token = current_request_id.set(request_id)
         request.state.request_id = request_id
-        route = request.url.path
+        path = request.url.path
         started = time.perf_counter()
         try:
-            declared = request.headers.get("content-length")
-            if declared and declared.isdigit() and int(declared) > cfg.obs.max_body_bytes:
-                response: Response = _error_response(
-                    status=413,
-                    error="PayloadTooLarge",
-                    detail=(
-                        f"request body of {declared} bytes exceeds the limit of "
-                        f"{cfg.obs.max_body_bytes} bytes"
-                    ),
-                    request_id=request_id,
-                )
-            else:
-                response = await call_next(request)
+            oversized = await _reject_oversized_body(request, cfg.obs.max_body_bytes, request_id)
+            response: Response = oversized if oversized is not None else await call_next(request)
 
             duration_ms = (time.perf_counter() - started) * 1000.0
             response.headers["X-Request-Id"] = request_id
             trace_id = getattr(request.state, "trace_id", "")
             if trace_id:
                 response.headers["X-Trace-Id"] = trace_id
+
+            # The metric label is the matched route TEMPLATE, never the raw path.
+            # `/v1/chunks/{chunk_id}` must aggregate across chunk ids: labelling by
+            # path would give every id its own one-sample histogram (no usable p95)
+            # and let any caller grow this in-process registry without bound.
+            route = getattr(request.scope.get("route"), "path", None) or "<unmatched>"
 
             METRICS.observe("http_request_ms", duration_ms, route=route, method=request.method)
             METRICS.incr(
@@ -158,6 +154,7 @@ def _register_middleware(app: FastAPI, cfg: Settings) -> None:
                 "http_request",
                 method=request.method,
                 route=route,
+                path=path,
                 status=response.status_code,
                 duration_ms=round(duration_ms, 2),
                 trace_id=trace_id,
@@ -165,6 +162,43 @@ def _register_middleware(app: FastAPI, cfg: Settings) -> None:
             return response
         finally:
             current_request_id.reset(token)
+
+
+async def _reject_oversized_body(
+    request: Request, limit: int, request_id: str
+) -> JSONResponse | None:
+    """Enforce the body cap on bytes actually READ, returning a 413 or None.
+
+    Content-Length is only a fast path — a `Transfer-Encoding: chunked` request
+    declares no length, so a header-only check is advisory against well-behaved
+    clients and no limit at all against anyone else. The body is therefore read
+    here, one chunk at a time, and abandoned the moment it crosses the cap.
+
+    What is read is handed to the downstream app through `Request._body`, which
+    is the cache `BaseHTTPMiddleware`'s request wrapper replays to the endpoint;
+    without it the handler would see an empty body.
+    """
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > limit:
+        return _error_response(
+            status=413,
+            error="PayloadTooLarge",
+            detail=f"request body of {declared} bytes exceeds the limit of {limit} bytes",
+            request_id=request_id,
+        )
+
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > limit:
+            return _error_response(
+                status=413,
+                error="PayloadTooLarge",
+                detail=f"request body exceeds the limit of {limit} bytes",
+                request_id=request_id,
+            )
+    request._body = bytes(body)
+    return None
 
 
 # ==============================================================================
@@ -232,6 +266,28 @@ def _register_handlers(app: FastAPI) -> None:
 # ==============================================================================
 
 
+def _confine_to_corpus_root(settings: Settings, requested: str | None) -> str | None:
+    """Keep an HTTP-supplied `corpus_dir` inside the configured corpus root.
+
+    The CLI may point ingest anywhere — its caller already has the filesystem.
+    An HTTP caller does not, and the service has no auth, so an unconfined
+    `corpus_dir` would let anyone on the network make the process read arbitrary
+    *.md/*.txt off the host and then serve the text back through `/v1/query` and
+    `/v1/chunks`. Absolute paths, `~` and `..` all reach `Settings.resolve`, so
+    the check is on the fully resolved path (symlinks included), not the string.
+    """
+    if requested is None:
+        return None
+    root = Path(settings.resolve(settings.paths.corpus_dir)).resolve()
+    candidate = Path(settings.resolve(requested)).resolve()
+    if not candidate.is_relative_to(root):
+        raise IngestError(
+            f"corpus_dir must be inside the configured corpus root {str(root)!r}; "
+            f"got {str(candidate)!r}"
+        )
+    return str(candidate)
+
+
 def _register_routes(app: FastAPI) -> None:
     def ctx_of(request: Request) -> AppContext:
         context: AppContext = request.app.state.ctx
@@ -266,11 +322,14 @@ def _register_routes(app: FastAPI) -> None:
 
     @app.post("/v1/ingest", response_model=IngestReport, tags=["corpus"])
     async def ingest(request: Request, body: IngestRequest) -> IngestReport:
-        """(Re)build the index, reusing the live stores so the running service sees it."""
+        """(Re)build the index, reusing the live stores so the running service sees it.
+
+        `corpus_dir` is confined to the configured corpus root: a 400 otherwise.
+        """
         ctx = ctx_of(request)
         report = ingest_corpus(
             ctx.settings,
-            corpus_dir=body.corpus_dir,
+            corpus_dir=_confine_to_corpus_root(ctx.settings, body.corpus_dir),
             store=ctx.store,
             vectors=ctx.vectors,
             embedder=ctx.embedder,

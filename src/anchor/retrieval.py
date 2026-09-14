@@ -298,7 +298,10 @@ def _block_from_chunk(chunk: Chunk, marker: str, text: str | None = None) -> Con
 
 
 def pack_context(
-    store: DocumentStore, candidates: list[Candidate], settings: Settings
+    store: DocumentStore,
+    candidates: list[Candidate],
+    settings: Settings,
+    max_blocks: int | None = None,
 ) -> list[ContextBlock]:
     """Turn ranked candidates into labelled ``[S1]..[Sn]`` blocks under a token budget.
 
@@ -306,9 +309,15 @@ def pack_context(
     evidence and cost budget. The last block that does not fit whole is TRUNCATED
     rather than dropped when a usable amount of it survives — dropping it would
     silently lose the citation target the generator was about to use.
+
+    ``max_blocks`` is the effective block cap; ``None`` means ``retrieval.top_k``
+    from config. :meth:`Retriever.retrieve` passes the PER-REQUEST value so that a
+    caller's ``top_k`` actually controls how many blocks come back — reading the
+    config value here instead is what made the API/CLI/tool ``top_k`` a no-op.
     """
     budget = int(settings.retrieval.context_token_budget)
-    max_blocks = int(settings.retrieval.top_k)
+    cap = settings.retrieval.top_k if max_blocks is None else max_blocks
+    max_blocks = max(int(cap), 1)
     window = int(settings.retrieval.neighbour_window)
     blocks: list[ContextBlock] = []
     used = 0
@@ -408,7 +417,13 @@ class Retriever:
         self, query: str, recorder: TraceRecorder | None = None, top_k: int | None = None
     ) -> RetrievalResult:
         mode = self.settings.retrieval.mode
-        k = int(top_k or self.settings.retrieval.top_k)
+        # A per-request value below 1 is not a retrieval strategy, it is a bad
+        # argument: 0 has always meant "use the configured default" at the CLI, and
+        # a negative used to slip through to disable MMR and shrink the candidate
+        # window. Both now mean "default" here; the rejection proper belongs on the
+        # request model (QueryRequest.top_k) and the CLI flag.
+        requested = int(top_k) if top_k is not None else 0
+        k = requested if requested >= 1 else int(self.settings.retrieval.top_k)
 
         if mode == "bm25":
             ranked = self._rank_single_leg(self._lexical(query, recorder))
@@ -454,10 +469,10 @@ class Retriever:
         blocks: list[ContextBlock] = []
         if gate.passed:
             if recorder is None:
-                blocks = pack_context(self.store, ranked[: max(k, 1) * 4], self.settings)
+                blocks = pack_context(self.store, ranked[: k * 4], self.settings, max_blocks=k)
             else:
                 with recorder.stage("retrieve.pack"):
-                    blocks = pack_context(self.store, ranked[: max(k, 1) * 4], self.settings)
+                    blocks = pack_context(self.store, ranked[: k * 4], self.settings, max_blocks=k)
                 recorder.record_context(blocks)
 
         return RetrievalResult(query=query, candidates=ranked, gate=gate, blocks=blocks)

@@ -112,6 +112,11 @@ def check_grounding(
     ]
 
     total = len(sentences)
+    # The denominator is EVERY sentence, including the uncited ones. Excluding them
+    # (``len(claims) / (total - uncited)``) would launder an answer that is mostly
+    # uncited fabrication into a perfect score — a three-sentence fabrication beside
+    # one cited sentence would report 1.0 instead of 0.25, and classify_answer would
+    # return GROUNDED instead of REFUSED_LOW_SUPPORT. Do not "fix" this ratio.
     support_ratio = (len(claims) / total) if total else 0.0
     return GroundingResult(
         claims=claims,

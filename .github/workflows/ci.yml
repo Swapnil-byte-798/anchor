@@ -83,11 +83,14 @@ jobs:
       # =======================================================================
       # THE REGRESSION GATE — the point of this workflow.
       #
-      # eval/thresholds.yaml holds min/max floors GENERATED from a real run by
-      # `make thresholds` (observed minus eval.threshold_slack), never typed by
-      # hand. If recall@5, groundedness, the unanswerable refusal rate or any
-      # other tracked metric drops below its floor, this step fails and the
-      # build is red. A retrieval regression cannot be merged silently.
+      # eval/thresholds.yaml holds min/max bounds GENERATED from a real run by
+      # `make thresholds` (observed minus eval.threshold_slack for a floor, plus
+      # it for a ceiling), never typed by hand. groundedness and
+      # fabrication_rate_unanswerable are reported but deliberately NOT bounded;
+      # the reasoning is in src/anchor/eval/report.py. If recall@5, recall@10,
+      # MRR or the unanswerable refusal rate drops below its floor — or the
+      # answerable false-refusal rate rises above its ceiling — this step fails
+      # and the build is red. A retrieval regression cannot be merged silently.
       # =======================================================================
       - name: Regression gate
         run: make gate

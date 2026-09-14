@@ -65,10 +65,12 @@ Two things in that table are worth more than the headline:
   why it is even measurable. The corpus has 38 `##` sections and the longest is
   **161 tokens**; chunking is section-bounded, so every budget at or above 161
   produces the *same 38-chunk index*. 256/64, 512/64 and 1024/128 are byte-identical
-  to the grid's 96/0 row (same sorted-chunk-id fingerprint `94f3896ba862`). `anchor
-  ablate` computes that fingerprint per config and banners duplicates, because a
-  duplicated index is not a second data point. A grid of 256/512/1024 would have
-  produced four identical blocks and a tautology.
+  to the grid's 96/0 row. `anchor ablate` fingerprints every index it builds by the
+  sha256 of its sorted chunk ids and banners the configurations that collide, because
+  a duplicated index is not a second data point — run
+  `anchor ablate --chunk-configs 96x0,256x64,512x64,1024x128` and the report opens
+  with `identical index: 96/0, 256/64, 512/64, 1024/128` instead of four data points.
+  A grid of 256/512/1024 would have produced four identical blocks and a tautology.
 
 Note the second consequence: the **shipped 512/64 default is the grid's 96/0 row**.
 The ablation covers the configuration that actually ships; it is just labelled by
@@ -103,7 +105,7 @@ re-evaluated.
 | `token_f1` | 0.108 | SQuAD token F1 against the best alias |
 | `citation_precision` | 0.636 | cited documents that are gold |
 | `citation_recall` | 0.621 | gold documents that were cited |
-| `groundedness` | 0.667 | share of answer sentences supported by their cited block |
+| `groundedness` | 0.636 | share of answer sentences supported by their cited block |
 | **Refusal behaviour** |  | |
 | `refusal_rate_unanswerable` | 0.700 | unanswerable questions correctly refused |
 | `fabrication_rate_unanswerable` | 0.300 | **answered WITH a citation anyway — lower is better** |
@@ -117,7 +119,7 @@ re-evaluated.
 
 | group | `recall_at_5` | `token_f1` | `groundedness` | `abstention_accuracy` | `n_errors` |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `authored` | 0.833 | 0.070 | 0.556 | 0.556 | 0 |
+| `authored` | 0.833 | 0.070 | 0.444 | 0.556 | 0 |
 | `entity_substituted` | 0.000 | 0.000 | 0.000 | 0.700 | 0 |
 | `mechanical` | 0.958 | 0.122 | 0.708 | 0.708 | 0 |
 
@@ -127,7 +129,7 @@ _A group with no gold — the unanswerable slice, provenance `entity_substituted
 
 | group | `recall_at_5` | `token_f1` | `groundedness` | `abstention_accuracy` | `n_errors` |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `arithmetic` | 1.000 | 0.038 | 0.750 | 0.750 | 0 |
+| `arithmetic` | 1.000 | 0.038 | 0.500 | 0.750 | 0 |
 | `factual` | 0.958 | 0.122 | 0.708 | 0.708 | 0 |
 | `multi_hop` | 0.700 | 0.096 | 0.400 | 0.400 | 0 |
 | `unanswerable` | 0.000 | 0.000 | 0.000 | 0.700 | 0 |
@@ -138,7 +140,6 @@ _A group with no gold — the unanswerable slice, provenance `entity_substituted
 * token_f1 is structurally low under the extractive stub and should not be read as answer quality: the stub returns whole cited SENTENCES while the gold aliases are short spans ('$180'), so token overlap is diluted by every other word in the sentence. exact_match — does the alias appear verbatim in the answer — is the informative answer-side metric on this profile.
 * mechanical questions (n=24): mean lexical overlap with their source sentence 0.236, max 0.412 (capped at 0.50 by the builder) — absolute recall is optimistic; trust the deltas.
 * tool_choice_accuracy is scored over the 4 of 43 cases that declare an expected_tool — NOT over all of them. At that denominator one case moves the number by 0.250.
-* groundedness is DEGENERATE on this run: it takes only the values 0.0 and 1.0 and is exactly `0.0 if abstained else 1.0` on every case, which makes it algebraically identical to 1 - false_refusal_rate_answerable over the answerable slice and means it carries no grounding information. The cause is a closed loop on the stub profile — the stub quotes sentences verbatim out of the block it then cites, so the verifier is scoring a sentence against its own source and cannot fail it. It is reported but NOT gated in eval/thresholds.yaml for exactly this reason; a real provider should make this note disappear.
 
 _Latency is deliberately absent from this table: it is machine-dependent, and this table is committed and re-checked in CI. p50/p95 are recorded in `eval/reports/<run_id>.json` and compared within one machine's run in `eval/reports/ablation.md`._
 
@@ -228,14 +229,27 @@ Stated plainly, because these are the reasons not to believe the absolute column
   absent from the corpus. The discrimination signal is about 0.1 at n=10, which is
   indistinguishable from zero. `refusal_rate_unanswerable` is a real guardrail
   measurement; it is not a "knows when it doesn't know" measurement.
-* **`groundedness` is degenerate on the stub profile.** The stub emits sentences
-  verbatim from the block it then cites, so the verifier scores a sentence against
-  its own source and cannot fail it. The metric takes only the values 0.0 and 1.0
-  and is algebraically `1 - false_refusal_rate_answerable` over the answerable
-  slice. It is reported because a real provider makes it informative, and it is
-  **not** in `eval/thresholds.yaml`, because gating it here would gate the
-  false-refusal rate twice under two names. Each `anchor eval` re-checks the
-  degeneracy and prints the note when it holds.
+* **`groundedness` is nearly degenerate on the stub profile.** On the `/v1/query`
+  path the stub emits sentences verbatim from the block it then cites, so the
+  verifier scores a sentence against its own source and cannot fail it: every one
+  of those cases scores exactly 0.0 (refused) or 1.0. The only cases that break the
+  pattern are the agent's, where a computed tool value is folded into the answer as
+  an uncited sentence and is scored as one — **2 of 43 cases score 0.5** on this
+  run, which is why the overall 0.636 no longer equals
+  `1 - false_refusal_rate_answerable` (0.667) exactly. It is reported because a real
+  provider makes it informative, and it is **not** in `eval/thresholds.yaml`,
+  because gating it here would come within 0.03 of gating the false-refusal rate
+  twice under two names. Each `anchor eval` re-checks the strict `0.0/1.0`
+  degeneracy and prints a generated note when it holds; on this run it does not
+  fire, which is exactly the signal that note exists to give.
+* **`fabrication_rate_unanswerable` is not gated either, for a related reason.** In
+  this pipeline a non-abstained answer always carries a citation — the verifier
+  drops every uncited sentence and builds `citations` only from supported claims —
+  so over the unanswerable slice fabrication is exactly
+  `1 - refusal_rate_unanswerable` (0.300 against 0.700 here). A ceiling on it is the
+  floor on refusal written a second time under another name, so the bound was
+  removed and the metric is reported only. A provider able to emit an uncited
+  answer makes the two independent again, at which point it can be gated.
 
 Full write-up including the bias that survives all four defences:
 **[eval/golden/PROTOCOL.md](eval/golden/PROTOCOL.md)**.
@@ -509,10 +523,11 @@ Two things are **half-done and are labelled as such** rather than quietly droppe
   paired cases takes the golden set from 43 to 53 and re-bases every metric, every
   threshold and the committed table, so it is feature work, not a fix. The claim it
   would support has been retracted in the meantime; the measurement does not exist yet.
-* **`groundedness` is still tautological on the stub profile** (section 2). It has
-  been removed from the CI floors so it is no longer a duplicated constraint, and the
-  eval run prints a generated note whenever the degeneracy holds, but the metric has
-  not been redesigned.
+* **`groundedness` is still all but tautological on the stub profile** (section 2).
+  It has been removed from the CI floors so it is no longer a duplicated constraint,
+  and the eval run prints a generated note whenever the strict `0.0/1.0` degeneracy
+  holds — the 2 agent cases scoring 0.5 are the only thing keeping that note from
+  firing — but the metric has not been redesigned.
 
 ---
 

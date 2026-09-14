@@ -18,7 +18,7 @@ import re
 import time
 from pathlib import Path
 
-from anchor.errors import IngestError
+from anchor.errors import IndexMismatchError, IngestError
 from anchor.obs import get_logger, log_event
 from anchor.settings import ChunkingSettings, Settings
 from anchor.textutil import (
@@ -373,6 +373,28 @@ def chunk_document(doc: LoadedDoc, settings: ChunkingSettings) -> list[Chunk]:
 # ---------------------------------------------------------------------------
 
 
+def _revector_stored_chunks(
+    store: DocumentStore,
+    vectors: VectorStore,
+    embedder: Embedder,
+    batch: int,
+) -> int:
+    """Embed every stored chunk that currently has no vector; returns how many.
+
+    This is what makes a reset safe. ``vectors.reset`` drops the whole matrix,
+    including the vectors of documents this run skipped by digest, and the vector
+    store has no per-id remove operation to do anything finer. Rebuilding from the
+    chunk rows the store already holds restores exactly one vector per chunk
+    without re-chunking unchanged documents.
+    """
+    pending = [chunk for chunk in store.list_chunks() if vectors.get(chunk.chunk_id) is None]
+    for start in range(0, len(pending), batch):
+        window = pending[start : start + batch]
+        matrix = embedder.embed_documents([c.text for c in window])
+        vectors.add([c.chunk_id for c in window], matrix)
+    return len(pending)
+
+
 def ingest_corpus(
     settings: Settings,
     *,
@@ -385,8 +407,19 @@ def ingest_corpus(
     """Load, chunk, embed and index the corpus. Idempotent by content digest.
 
     A document whose stored sha256 still matches is skipped outright; a changed one
-    is deleted first and re-indexed, so running ingest twice is a no-op and running
-    it after an edit is a clean replacement rather than a merge.
+    is deleted first and re-indexed, so running ingest twice is a no-op.
+
+    Making that re-index a clean replacement rather than a merge takes a whole-index
+    rebuild, and the reason is the chunk id. ``make_chunk_id`` hashes char offsets,
+    so any edit that shifts offsets renames every later chunk; deleting the old chunk
+    ROWS leaves their vectors behind, and :class:`~anchor.store.NumpyVectorStore` has
+    no way to remove a vector. So whenever a run would replace an existing document
+    (or the vector file is missing, or the embedder changed) the matrix is reset up
+    front and rebuilt: re-indexed documents are embedded from their new chunks, and
+    documents skipped by digest are re-embedded from their stored ones. The run ends
+    on the invariant the rest of the system assumes — exactly one vector per chunk —
+    and raises :class:`IndexMismatchError` rather than persisting an index that
+    breaks it.
     """
     started = time.perf_counter()
     opened_store: DocumentStore | None = None
@@ -425,25 +458,54 @@ def ingest_corpus(
         ]
         # An index built before the exclusion existed still holds the document.
         # Drop it rather than leaving it retrievable until someone runs --force.
+        dropped_excluded = False
         for stale in excluded:
             if store.get_document(stale) is not None:
                 store.delete_document(stale)
+                dropped_excluded = True
                 log_event(_LOG, logging.INFO, "ingest.excluded", doc_id=stale)
 
+        existing_by_id = {doc.doc_id: store.get_document(doc.doc_id) for doc in docs}
+        # Any document whose chunks are about to be deleted and rewritten orphans
+        # its vectors: chunk ids carry char offsets, so an edit that shifts offsets
+        # renames every later chunk and `add` cannot overwrite rows it can no longer
+        # name. The vector store has no remove, so a rebuild is the only clean
+        # replacement available.
+        replaces_existing = dropped_excluded or any(
+            (existing := existing_by_id[doc.doc_id]) is not None and existing.sha256 != doc.sha256
+            for doc in docs
+        )
         meta = vectors.meta()
+        # The `count() != count_chunks()` term is what makes a plain re-run repair a
+        # diverged index instead of dead-ending on the invariant check below. The
+        # vector file can be deleted, truncated, or left stale by a run interrupted
+        # after SQLite committed; in every one of those states no document looks
+        # changed, so nothing else here would ask for a reset. There is no per-id
+        # repair available — the vector store has no remove — so a rebuild is the
+        # only fix, and `anchor ingest` should perform it rather than demand a
+        # `--force` that nothing in the output suggests.
         needs_reset = (
             force
             or vectors.count() == 0
+            or vectors.count() != store.count_chunks()
             or meta.get("embedder") != embedder.name
             or int(meta.get("dim", 0)) != embedder.dim
+            or replaces_existing
         )
-        has_reset = False
+        # Hoisted OUT of the document loop. A run where every document is skipped by
+        # digest still has to reset — the vector file can be missing or stale while
+        # the SQLite index is intact — and that run reached neither the old in-loop
+        # reset nor any `add`, so it persisted a zero-row matrix over a live index
+        # and reported success.
+        if needs_reset:
+            vectors.reset(embedder.name, embedder.dim)
 
+        batch = max(1, int(settings.embedding.batch_size))
         indexed = 0
         skipped = 0
         chunks_written = 0
         for doc in docs:
-            existing = store.get_document(doc.doc_id)
+            existing = existing_by_id[doc.doc_id]
             if existing is not None and existing.sha256 == doc.sha256 and not force:
                 skipped += 1
                 log_event(
@@ -454,16 +516,12 @@ def ingest_corpus(
                     reason="unchanged_sha256",
                 )
                 continue
-            if needs_reset and not has_reset:
-                vectors.reset(embedder.name, embedder.dim)
-                has_reset = True
             if existing is not None:
                 store.delete_document(doc.doc_id)
 
             chunks = chunk_document(doc, settings.chunking)
             if not chunks:
                 raise IngestError(f"document {doc.doc_id!r} produced no chunks")
-            batch = max(1, int(settings.embedding.batch_size))
             for start in range(0, len(chunks), batch):
                 window = chunks[start : start + batch]
                 matrix = embedder.embed_documents([c.text for c in window])
@@ -491,6 +549,26 @@ def ingest_corpus(
                 tokens=sum(c.n_tokens for c in chunks),
             )
 
+        if needs_reset:
+            # Documents skipped by digest lost their vectors to the reset above;
+            # give them back from the chunk rows the store already holds.
+            restored = _revector_stored_chunks(store, vectors, embedder, batch)
+            if restored:
+                log_event(_LOG, logging.INFO, "ingest.vectors_rebuilt", chunks=restored)
+
+        # The invariant every consumer assumes and nothing used to check: one vector
+        # per chunk. Raising here (instead of persisting) is what turns a silently
+        # degraded dense leg into a visible failure — `search_dense` drops hits whose
+        # chunk row is gone, so an index that breaks this returns fewer, worse
+        # candidates and reports nothing.
+        vector_count = vectors.count()
+        chunk_count = store.count_chunks()
+        if vector_count != chunk_count:
+            raise IndexMismatchError(
+                f"index is inconsistent after ingest: {vector_count} vectors for "
+                f"{chunk_count} chunks. The vector file and the document store have "
+                "diverged; re-run `anchor ingest --force` to rebuild."
+            )
         vectors.persist()
         report = IngestReport(
             documents_seen=len(docs),

@@ -377,8 +377,18 @@ def test_write_thresholds_puts_the_floors_exactly_slack_below_the_run(tmp_path: 
     # wrote the SAME constraint into this file twice under two different names.
     assert "groundedness" not in spec.min
     assert "groundedness" not in spec.max
+    # fabrication_rate_unanswerable is NOT gated either, for the same reason.
+    # It counts unanswerable cases that were answered AND cited a document; in
+    # this pipeline a non-abstained answer always carries a citation, because
+    # `check_grounding` drops every uncited sentence and builds `citations` only
+    # from the markers of a SUPPORTED claim, and `classify_answer` refuses below
+    # `partial_ratio`. Over the unanswerable slice that makes fabrication exactly
+    # `1 - refusal_rate_unanswerable` (they sum to 1.000000 on every committed
+    # run), so a ceiling on it is the floor on refusal written a second time
+    # under another name. The metric is still COMPUTED and still in the README
+    # table — it is the redundant BOUND that was removed.
+    assert "fabrication_rate_unanswerable" not in spec.max
     # ... and ceilings are observed + slack.
-    assert spec.max["fabrication_rate_unanswerable"] == pytest.approx(0.25)
     assert spec.max["false_refusal_rate_answerable"] == pytest.approx(0.35)
     assert spec.generated_from_run == "run-1"
 
@@ -431,4 +441,8 @@ def test_committed_thresholds_file_is_loadable_and_generated() -> None:
     assert spec.generated_from_run, "thresholds.yaml must record the run that generated it"
     assert spec.slack > 0
     assert "recall_at_5" in spec.min
-    assert "fabrication_rate_unanswerable" in spec.max
+    assert "false_refusal_rate_answerable" in spec.max
+    # The duplicate ceiling on fabrication_rate_unanswerable was removed from
+    # MAX_METRICS; a regenerated file must not carry it. See the reasoning in
+    # test_write_thresholds_puts_the_floors_exactly_slack_below_the_run.
+    assert "fabrication_rate_unanswerable" not in spec.max

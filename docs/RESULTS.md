@@ -23,8 +23,14 @@ seed 1337. 6 corpus documents, 38 chunks at the shipped chunking, 43 golden case
 
 ## 1. Ablation — 4 retrieval strategies x 6 chunk configs
 
-From `eval/reports/ablation.md`, run `2026-09-13T22:31:11Z`, config fingerprint
-`ef995ed4d623`. Retrieval only: no generation, no grounding, no judge. `bm25` is the
+From `eval/reports/ablation.md`, run `2026-09-14T10:50:29Z`, base config fingerprint
+`66a15864436b` — the digest of the settings the command was invoked with, the same
+one `anchor eval` stamps and the one in the README. (Each cell of the grid is
+ingested into a throwaway directory and overrides `chunk_tokens`/`chunk_overlap`, so
+a per-cell digest would differ from every other artifact in the repo for reasons
+that have nothing to do with the experiment; the two swept fields are printed with
+the rows instead — the chunk config heads each block, the mode labels each row.)
+Retrieval only: no generation, no grounding, no judge. `bm25` is the
 declared baseline and is printed first in every block; the Δ column is recall@5 minus
 the `bm25` row **of the same chunk config**.
 
@@ -36,55 +42,55 @@ committed README table and from the CI gate.
 
 | mode | recall@5 | recall@10 | MRR | nDCG@10 | p50 ms | p95 ms | Δ recall@5 vs bm25 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `bm25` **(baseline)** | 1.000 | 1.000 | 0.970 | 0.980 | 2.7 | 3.1 | — |
-| `dense` | 0.909 | 0.939 | 0.817 | 0.836 | 2.5 | 5.4 | -0.091 |
-| `hybrid` | 0.924 | 0.985 | 0.810 | 0.852 | 6.8 | 13.5 | -0.076 |
-| `hybrid_rerank` | 0.955 | 1.000 | 0.960 | 0.960 | 7.0 | 14.0 | -0.045 |
+| `bm25` **(baseline)** | 1.000 | 1.000 | 0.970 | 0.980 | 12.1 | 28.3 | — |
+| `dense` | 0.909 | 0.939 | 0.817 | 0.836 | 11.6 | 32.6 | -0.091 |
+| `hybrid` | 0.924 | 0.985 | 0.810 | 0.852 | 31.3 | 108.9 | -0.076 |
+| `hybrid_rerank` | 0.955 | 1.000 | 0.960 | 0.960 | 42.8 | 108.2 | -0.045 |
 
 #### chunk_tokens=96, chunk_overlap=24
 
 | mode | recall@5 | recall@10 | MRR | nDCG@10 | p50 ms | p95 ms | Δ recall@5 vs bm25 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `bm25` **(baseline)** | 1.000 | 1.000 | 0.970 | 0.979 | 2.9 | 3.5 | — |
-| `dense` | 0.909 | 0.939 | 0.833 | 0.844 | 2.4 | 4.2 | -0.091 |
-| `hybrid` | 0.924 | 0.985 | 0.833 | 0.859 | 5.8 | 7.2 | -0.076 |
-| `hybrid_rerank` | 0.955 | 1.000 | 0.975 | 0.971 | 7.5 | 14.2 | -0.045 |
+| `bm25` **(baseline)** | 1.000 | 1.000 | 0.970 | 0.979 | 22.5 | 153.1 | — |
+| `dense` | 0.909 | 0.939 | 0.833 | 0.844 | 31.3 | 152.7 | -0.091 |
+| `hybrid` | 0.924 | 0.985 | 0.833 | 0.859 | 50.1 | 229.4 | -0.076 |
+| `hybrid_rerank` | 0.955 | 1.000 | 0.975 | 0.971 | 33.9 | 82.3 | -0.045 |
 
 #### chunk_tokens=96, chunk_overlap=40
 
 | mode | recall@5 | recall@10 | MRR | nDCG@10 | p50 ms | p95 ms | Δ recall@5 vs bm25 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `bm25` **(baseline)** | 1.000 | 1.000 | 0.955 | 0.970 | 3.5 | 7.9 | — |
-| `dense` | 0.864 | 0.924 | 0.786 | 0.801 | 2.5 | 5.0 | -0.136 |
-| `hybrid` | 0.909 | 0.970 | 0.803 | 0.830 | 6.0 | 8.5 | -0.091 |
-| `hybrid_rerank` | 0.939 | 0.985 | 0.960 | 0.953 | 7.3 | 12.0 | -0.061 |
+| `bm25` **(baseline)** | 1.000 | 1.000 | 0.955 | 0.970 | 13.5 | 28.4 | — |
+| `dense` | 0.864 | 0.924 | 0.786 | 0.801 | 8.8 | 32.9 | -0.136 |
+| `hybrid` | 0.909 | 0.970 | 0.803 | 0.830 | 26.2 | 144.8 | -0.091 |
+| `hybrid_rerank` | 0.939 | 0.985 | 0.960 | 0.953 | 70.7 | 136.7 | -0.061 |
 
 #### chunk_tokens=112, chunk_overlap=24
 
 | mode | recall@5 | recall@10 | MRR | nDCG@10 | p50 ms | p95 ms | Δ recall@5 vs bm25 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `bm25` **(baseline)** | 1.000 | 1.000 | 0.970 | 0.979 | 3.2 | 3.9 | — |
-| `dense` | 0.909 | 0.939 | 0.833 | 0.844 | 2.3 | 2.9 | -0.091 |
-| `hybrid` | 0.924 | 0.985 | 0.833 | 0.859 | 5.9 | 8.5 | -0.076 |
-| `hybrid_rerank` | 0.955 | 1.000 | 0.975 | 0.971 | 7.4 | 14.9 | -0.045 |
+| `bm25` **(baseline)** | 1.000 | 1.000 | 0.970 | 0.979 | 8.8 | 15.6 | — |
+| `dense` | 0.909 | 0.939 | 0.833 | 0.844 | 9.4 | 28.6 | -0.091 |
+| `hybrid` | 0.924 | 0.985 | 0.833 | 0.859 | 35.3 | 158.2 | -0.076 |
+| `hybrid_rerank` | 0.955 | 1.000 | 0.975 | 0.971 | 37.1 | 97.0 | -0.045 |
 
 #### chunk_tokens=128, chunk_overlap=24
 
 | mode | recall@5 | recall@10 | MRR | nDCG@10 | p50 ms | p95 ms | Δ recall@5 vs bm25 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `bm25` **(baseline)** | 1.000 | 1.000 | 0.970 | 0.979 | 2.9 | 3.9 | — |
-| `dense` | 0.909 | 0.939 | 0.833 | 0.844 | 2.4 | 4.6 | -0.091 |
-| `hybrid` | 0.924 | 0.985 | 0.833 | 0.860 | 6.1 | 9.8 | -0.076 |
-| `hybrid_rerank` | 0.955 | 1.000 | 0.975 | 0.971 | 7.1 | 8.0 | -0.045 |
+| `bm25` **(baseline)** | 1.000 | 1.000 | 0.970 | 0.979 | 18.5 | 89.8 | — |
+| `dense` | 0.909 | 0.939 | 0.833 | 0.844 | 17.1 | 78.6 | -0.091 |
+| `hybrid` | 0.924 | 0.985 | 0.833 | 0.860 | 60.4 | 125.0 | -0.076 |
+| `hybrid_rerank` | 0.955 | 1.000 | 0.975 | 0.971 | 41.5 | 99.1 | -0.045 |
 
 #### chunk_tokens=144, chunk_overlap=24
 
 | mode | recall@5 | recall@10 | MRR | nDCG@10 | p50 ms | p95 ms | Δ recall@5 vs bm25 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `bm25` **(baseline)** | 1.000 | 1.000 | 0.970 | 0.980 | 2.8 | 3.8 | — |
-| `dense` | 0.909 | 0.939 | 0.817 | 0.837 | 2.5 | 3.2 | -0.091 |
-| `hybrid` | 0.924 | 1.000 | 0.811 | 0.857 | 5.6 | 6.9 | -0.076 |
-| `hybrid_rerank` | 0.955 | 1.000 | 0.960 | 0.960 | 6.9 | 8.3 | -0.045 |
+| `bm25` **(baseline)** | 1.000 | 1.000 | 0.970 | 0.980 | 9.5 | 32.0 | — |
+| `dense` | 0.909 | 0.939 | 0.817 | 0.837 | 12.3 | 41.9 | -0.091 |
+| `hybrid` | 0.924 | 1.000 | 0.811 | 0.857 | 30.8 | 93.9 | -0.076 |
+| `hybrid_rerank` | 0.955 | 1.000 | 0.960 | 0.960 | 71.3 | 217.1 | -0.045 |
 
 ### The report's own verdict, verbatim
 
@@ -104,17 +110,29 @@ binding. The corpus has 38 `##` sections and the longest is **161 tokens**, and
 chunking is section-bounded with `min_chunk_tokens: 80`, so every budget at or
 above 161 collapses to the same 38-chunk index:
 
-| chunk config | chunks | index fingerprint |
+| chunk config | chunks | distinct index? |
 | --- | ---: | --- |
-| 96/0 | 38 | `94f3896ba862` |
-| 96/24 | 43 | `784f153eaa57` |
-| 96/40 | 44 | `0a5b01faf5af` |
-| 112/24 | 44 | `6caf50253590` |
-| 128/24 | 43 | `c6a13ee8cdcb` |
-| 144/24 | 39 | `a0da946905ba` |
-| 256/64 | 38 | `94f3896ba862` |
-| **512/64 (shipped default)** | **38** | **`94f3896ba862`** |
-| 1024/128 | 38 | `94f3896ba862` |
+| 96/0 | 38 | — (the shared index) |
+| 96/24 | 43 | yes |
+| 96/40 | 44 | yes |
+| 112/24 | 44 | yes |
+| 128/24 | 43 | yes |
+| 144/24 | 39 | yes |
+| 256/64 | 38 | no — same index as 96/0 |
+| **512/64 (shipped default)** | **38** | **no — same index as 96/0** |
+| 1024/128 | 38 | no — same index as 96/0 |
+
+The digests themselves are not transcribed here on purpose: no shipped command
+prints them individually, and a hex literal in a document with no command behind it
+is the failure mode this repo exists to prevent. The collision is what the tool
+reports, and it reports it as a banner — run
+
+```bash
+anchor ablate --chunk-configs 96x0,256x64,512x64,1024x128
+```
+
+and the generated report opens with `identical index: 96/0, 256/64, 512/64,
+1024/128` in place of four data points.
 
 The six grid rows are six distinct indexes. The shipped 512/64 default is
 **byte-identical to the grid's 96/0 row**, so the ablation does cover the shipped
@@ -133,7 +151,7 @@ finding.
 The authoritative copy of this table is the CI-checked block in
 [`../README.md`](../README.md); it is regenerated by `make readme` from
 `eval/reports/latest.json` and `--check` fails the build when it drifts. Run
-`20260913T223236Z-66a15864436b`, n=43.
+`20260914T104921Z-66a15864436b`, n=43.
 
 | metric | `hybrid` 512/64 |
 | --- | ---: |
@@ -146,7 +164,7 @@ The authoritative copy of this table is the CI-checked block in
 | `token_f1` | 0.108 |
 | `citation_precision` | 0.636 |
 | `citation_recall` | 0.621 |
-| `groundedness` | 0.667 |
+| `groundedness` | 0.636 |
 | `refusal_rate_unanswerable` | 0.700 |
 | `fabrication_rate_unanswerable` | 0.300 |
 | `false_refusal_rate_answerable` | 0.333 |
@@ -158,7 +176,7 @@ The authoritative copy of this table is the CI-checked block in
 
 | group | `recall_at_5` | `token_f1` | `groundedness` | `abstention_accuracy` | `n_errors` |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `authored` | 0.833 | 0.070 | 0.556 | 0.556 | 0 |
+| `authored` | 0.833 | 0.070 | 0.444 | 0.556 | 0 |
 | `entity_substituted` | 0.000 | 0.000 | 0.000 | 0.700 | 0 |
 | `mechanical` | 0.958 | 0.122 | 0.708 | 0.708 | 0 |
 
@@ -166,7 +184,7 @@ The authoritative copy of this table is the CI-checked block in
 
 | group | `recall_at_5` | `token_f1` | `groundedness` | `abstention_accuracy` | `n_errors` |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `arithmetic` | 1.000 | 0.038 | 0.750 | 0.750 | 0 |
+| `arithmetic` | 1.000 | 0.038 | 0.500 | 0.750 | 0 |
 | `factual` | 0.958 | 0.122 | 0.708 | 0.708 | 0 |
 | `multi_hop` | 0.700 | 0.096 | 0.400 | 0.400 | 0 |
 | `unanswerable` | 0.000 | 0.000 | 0.000 | 0.700 | 0 |
@@ -182,8 +200,8 @@ observations, not as a rate.
 ### The CI floors
 
 `eval/thresholds.yaml`, generated by `make thresholds` from run
-`20260913T223237Z-66a15864436b` with `slack: 0.05`. Never hand-edited; `make gate`
-fails the build on a breach.
+`20260914T110919Z-66a15864436b` with `slack: 0.05`. Never hand-edited; `make gate`
+fails the build on a breach — five checks.
 
 | bound | metric | value |
 | --- | --- | ---: |
@@ -191,13 +209,32 @@ fails the build on a breach.
 | min | `recall_at_10` | 0.9348 |
 | min | `mrr` | 0.7604 |
 | min | `refusal_rate_unanswerable` | 0.65 |
-| max | `fabrication_rate_unanswerable` | 0.35 |
 | max | `false_refusal_rate_answerable` | 0.3833 |
 
 Latency and `n_errors` are deliberately not gated: they are machine-dependent, and
-a flaky gate is an ignored gate. `groundedness` is not gated either — on the stub
-profile it is exactly `0.0 if abstained else 1.0`, which makes gating it a second,
-differently-named copy of the false-refusal constraint.
+a flaky gate is an ignored gate.
+
+Two answer-side metrics are reported in the table above but deliberately **not**
+bounded here, both because the bound would have been a second copy of one already
+in the list:
+
+* `groundedness`. On the stub profile the generator quotes sentences verbatim out
+  of the block it then cites, so every `/v1/query` case scores exactly 0.0 or 1.0
+  and the mean is all but `1 - false_refusal_rate_answerable` over the answerable
+  slice. The only cases that break the pattern are the 2 agent cases that fold an
+  uncited tool value into the answer and score 0.5 — which is why the run's 0.636
+  is just short of the 0.667 that identity predicts. `anchor eval` re-checks the
+  strict `0.0/1.0` degeneracy on every run and prints a generated note when it
+  holds.
+* `fabrication_rate_unanswerable`. It counts unanswerable cases that were answered
+  **and** cited a document, while `refusal_rate_unanswerable` counts the ones that
+  abstained. In this pipeline a non-abstained answer always carries a citation — the
+  verifier drops every uncited sentence and builds `citations` only from the markers
+  of a supported claim, and the classifier refuses below `partial_ratio` — so over
+  that slice fabrication is exactly `1 - refusal_rate_unanswerable` (0.300 against
+  0.700 on this run). A ceiling on it was the floor on refusal written twice under
+  two names. A provider or grounding path able to emit an uncited answer makes the
+  two independent again, at which point it can be gated.
 
 ---
 
@@ -248,7 +285,7 @@ separately as `fabrication_rate_unanswerable`.
 
 ## 4. Judge validation — full confusion matrix and every disagreement
 
-From `eval/reports/judge.md`, run `2026-09-13T22:32:39Z`. Judge under test:
+From `eval/reports/judge.md`, run `2026-09-14T10:50:56Z`. Judge under test:
 `heuristic`, the offline default. Scored against 30 frozen `(question, answer,
 evidence)` triples in `eval/golden/human_labels.jsonl` — 12 faithful answers, 9 with
 one unsupported clause, 9 fabrications. Nothing is retrieved or generated, so this

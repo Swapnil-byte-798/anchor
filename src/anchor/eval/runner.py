@@ -19,7 +19,13 @@ What this module is careful about, in order of how much it matters:
     look like without them, in every table, without asking.
 
 4.  **One case can never abort the run.** Any exception is caught, recorded on
-    ``CaseResult.error`` and counted in ``n_errors``.
+    ``CaseResult.error`` and counted in ``n_errors``. An errored case is then
+    EXCLUDED from every denominator — retrieval, answer, refusal, abstention,
+    tool choice and latency alike — because a case that did not execute is not
+    evidence of anything. That is the same bargain :mod:`anchor.eval.cases`
+    makes for an unresolvable label: it is a bug to fix loudly, not a score of
+    zero to average in quietly. ``n_errors`` and a note naming every failed case
+    carry the loudness; nothing else is allowed to move.
 
 5.  ``retrieval_only=True`` skips generation, grounding and judging entirely.
     That is the mode :mod:`anchor.eval.ablation` uses, and it is why 24 grid
@@ -272,7 +278,11 @@ def _aggregate(
         )
     errored = [result.case_id for result in results if result.error]
     if errored:
-        notes.append(f"{len(errored)} case(s) errored and scored zero: {', '.join(errored)}")
+        notes.append(
+            f"{len(errored)} case(s) errored and were EXCLUDED from every denominator — "
+            f"every metric below is over the {len(results) - len(errored)} of {len(results)} "
+            f"cases that ran: {', '.join(errored)}"
+        )
     mechanical = [case for case in cases if case.provenance == "mechanical"]
     if mechanical:
         overlaps = [case.stem_overlap for case in mechanical]
@@ -285,7 +295,9 @@ def _aggregate(
     tool_choice_n = sum(
         1
         for result in results
-        if (case := by_id.get(result.case_id)) is not None and case.expected_tool
+        if not result.error
+        and (case := by_id.get(result.case_id)) is not None
+        and case.expected_tool
     )
     if not retrieval_only:
         notes.append(
@@ -335,7 +347,10 @@ def _aggregate(
 def _compute_metrics(cases: dict[str, EvalCase], results: list[CaseResult]) -> dict[str, float]:
     """The EXACT :data:`anchor.types.METRIC_KEYS` key set, over the given results.
 
-    Split of the denominators, stated once:
+    Split of the denominators, stated once. Every one of them is taken over the
+    cases that RAN: a case carrying ``error`` is excluded everywhere, since it
+    produced no retrieval, no answer and no abstention decision to score. Only
+    ``n_errors`` counts it, and the run notes name it.
 
     * retrieval and answer metrics -> answerable cases (those with gold spans)
     * refusal / fabrication rates  -> the unanswerable slice
@@ -343,8 +358,9 @@ def _compute_metrics(cases: dict[str, EvalCase], results: list[CaseResult]) -> d
     * abstention accuracy          -> all cases
     * tool-choice accuracy         -> only cases carrying an ``expected_tool``
     """
-    answerable = [r for r in results if not _is_unanswerable(cases.get(r.case_id), r)]
-    unanswerable = [r for r in results if _is_unanswerable(cases.get(r.case_id), r)]
+    completed = [r for r in results if not r.error]
+    answerable = [r for r in completed if not _is_unanswerable(cases.get(r.case_id), r)]
+    unanswerable = [r for r in completed if _is_unanswerable(cases.get(r.case_id), r)]
     scorable = [r for r in answerable if r.gold_chunk_ids]
 
     citation_scores = [
@@ -382,11 +398,11 @@ def _compute_metrics(cases: dict[str, EvalCase], results: list[CaseResult]) -> d
         ),
         "false_refusal_rate_answerable": _mean([1.0 if r.abstained else 0.0 for r in answerable]),
         "abstention_accuracy": _mean(
-            [_abstention_correct(cases.get(r.case_id), r) for r in results]
+            [_abstention_correct(cases.get(r.case_id), r) for r in completed]
         ),
-        "tool_choice_accuracy": _tool_choice_accuracy(cases, results),
-        "latency_p50_ms": percentile([r.latency_ms for r in results], 0.50),
-        "latency_p95_ms": percentile([r.latency_ms for r in results], 0.95),
+        "tool_choice_accuracy": _tool_choice_accuracy(cases, completed),
+        "latency_p50_ms": percentile([r.latency_ms for r in completed], 0.50),
+        "latency_p95_ms": percentile([r.latency_ms for r in completed], 0.95),
         "n_errors": float(sum(1 for r in results if r.error)),
     }
 

@@ -11,19 +11,25 @@
 # system until the run produces a better number, then regenerate this file.
 #
 # `make gate` (run by CI on every push) fails the build when a metric falls below
-# its floor or rises above its ceiling. Latency and n_errors are deliberately NOT
-# gated: they are machine-dependent, and a flaky gate is an ignored gate.
+# its floor or rises above its ceiling. Not every metric in the README table is
+# bounded here, and the omissions are deliberate:
+#   * latency_p50_ms / latency_p95_ms / n_errors — machine-dependent or
+#     bookkeeping, and a flaky gate is an ignored gate.
+#   * groundedness and fabrication_rate_unanswerable — on this profile each is
+#     algebraically a copy of a bound already in the list (the answerable
+#     false-refusal rate and the unanswerable refusal rate respectively), so
+#     bounding them wrote the same inequality twice under two names. They are
+#     still computed and still reported. See src/anchor/eval/report.py.
 #
-# Generated from run: 20260913T223237Z-66a15864436b
+# Generated from run: 20260914T110919Z-66a15864436b
 # Slack: 0.05
 # =============================================================================
 slack: 0.05
-generated_from_run: 20260913T223237Z-66a15864436b
+generated_from_run: 20260914T110919Z-66a15864436b
 min:
   mrr: 0.7604
   recall_at_10: 0.9348
   recall_at_5: 0.8742
   refusal_rate_unanswerable: 0.65
 max:
-  fabrication_rate_unanswerable: 0.35
   false_refusal_rate_answerable: 0.3833
