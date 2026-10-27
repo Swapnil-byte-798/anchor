@@ -5,6 +5,10 @@ that says where its retrieval actually fails.** Six synthetic documents, 43 gold
 cases, five commands that produce every number on this page. Zero API keys, zero
 network calls.
 
+**Optional MCP add-on:** expose the existing document search, calculator and
+metric lookup tools to an MCP host over local stdio. The normal API, CLI and
+evaluation workflow are unchanged. See [the setup and limits](docs/MCP.md).
+
 ## The headline finding
 
 > **The hybrid retriever this repo ships is worse than the 40 lines of SQLite FTS5
