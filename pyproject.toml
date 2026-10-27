@@ -52,6 +52,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Optional local stdio adapter; the normal installation does not need the SDK.
+mcp = ["mcp>=2.3,<3"]
 # Only needed if you switch llm.provider or embedding.provider to `bedrock`.
 bedrock = ["boto3>=1.34"]
 dev = [
@@ -128,6 +130,11 @@ ignore_missing_imports = false
 # boto3 is an optional extra (only the `bedrock` provider imports it, lazily)
 # and ships no stubs we depend on.
 module = ["boto3", "boto3.*", "botocore", "botocore.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# The MCP adapter imports its extra lazily; base installations can typecheck too.
+module = ["mcp", "mcp.*", "mcp_types", "mcp_types.*"]
 ignore_missing_imports = true
 
 # ---- pytest -----------------------------------------------------------------
